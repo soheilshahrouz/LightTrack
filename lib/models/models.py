@@ -7,6 +7,10 @@ from lib.models.submodels import build_subnet_head, build_subnet_BN, build_subne
 import numpy as np
 import random
 
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
 
 class LightTrackM_Supernet(Super_model_DP):
     def __init__(self, search_size=256, template_size=128, stride=16, adj_channel=128, build_module=True):
@@ -90,6 +94,67 @@ class LightTrackM_Speed(LightTrackM_Subnet):
         # head
         oup = self.head(feat_dict)
         return oup
+
+
+class LightTrackTemplateMaker(nn.Module):
+    def __init__(self, model):
+        super(LightTrackTemplateMaker, self).__init__()
+
+        self.features = model.features
+        self.neck = model.neck.BN_z
+        self.feature_fusor = model.feature_fusor
+        self.head = model.head
+
+        self.mean = torch.tensor([0.485, 0.456, 0.406], device="cuda").view(3, 1, 1)
+        self.std = torch.tensor([0.229, 0.224, 0.225], device="cuda").view(3, 1, 1)
+
+    def normalize(self, x):
+        """ input is in (C,H,W) format"""
+        x /= 255
+        x -= self.mean
+        x /= self.std
+        return x
+
+    def forward(self, x):
+        
+        x_perm = x.permute((0, 3, 1, 2))
+        x_norm = self.normalize(x_perm)
+        x_f = self.features(x_norm)
+        x_f = self.neck(x_f)
+        return x_f
+
+
+
+class LightTrackForward(nn.Module):
+    def __init__(self, model):
+        super(LightTrackForward, self).__init__()
+
+        self.features = model.features
+        self.neck = model.neck.BN_x
+        self.feature_fusor = model.feature_fusor
+        self.head = model.head
+
+        self.mean = torch.tensor([0.485, 0.456, 0.406], device="cuda").view(3, 1, 1)
+        self.std = torch.tensor([0.229, 0.224, 0.225], device="cuda").view(3, 1, 1)
+
+    def normalize(self, x):
+        """ input is in (C,H,W) format"""
+        x /= 255
+        x -= self.mean
+        x /= self.std
+        return x
+
+    def forward(self, x, z_f):
+        
+        x_perm = x.permute((0, 3, 1, 2))
+        x_norm = self.normalize(x_perm)
+        x_f = self.features(x_norm)
+        x_f = self.neck(x_f)
+        x_f = self.feature_fusor(z_f, x_f)
+        oup = self.head(x_f)
+        return oup['reg'], oup['cls']
+
+        return x_f
 
 
 class SuperNetToolbox(object):

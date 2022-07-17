@@ -166,6 +166,29 @@ def main():
     siam_net.eval()
     siam_net = siam_net.cuda()
 
+    temp_model = models.LightTrackTemplateMaker(siam_net)
+    dummy_input = torch.randn(1, 127, 127, 3, device="cuda")
+    input_names  = [ "template_maker_input" ]
+    output_names = [ "template_maker_kernel_output"]
+
+    torch.onnx.export(temp_model, dummy_input, "LightTrack_Template_Maker.onnx", export_params=True,
+        verbose=True, input_names=input_names, output_names=output_names)
+
+
+
+    forw_model = models.LightTrackForward(siam_net)
+    dummy_input = torch.randn(1, 255, 255, 3, device="cuda")
+    dummy_kernel = torch.randn(1, 96, 8, 8, device="cuda")
+    input_names  = [ "forward_input", "forward_kernel" ]
+    output_names = [ "forward_reg_output", "forward_cls_output"]
+
+    torch.onnx.export(forw_model, (dummy_input, dummy_kernel), "LightTrack_Forward.onnx", export_params=True,
+        verbose=True, input_names=input_names, output_names=output_names)
+
+    exit()
+
+
+
     # prepare video
     dataset = load_dataset(args.dataset)
     video_keys = list(dataset.keys()).copy()
