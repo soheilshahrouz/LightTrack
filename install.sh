@@ -6,7 +6,7 @@ pip install lmdb
 echo ""
 echo ""
 echo "****************** Installing pytorch with cuda10 ******************"
-conda install -y pytorch==1.1.0 torchvision==0.3.0 cudatoolkit=10.0 -c pytorch
+conda install -y pytorch==1.3.0 torchvision==0.3.0 cudatoolkit=10.0 -c pytorch
 
 echo ""
 echo ""

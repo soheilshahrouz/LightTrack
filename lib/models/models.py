@@ -124,6 +124,42 @@ class LightTrackTemplateMaker(nn.Module):
         return x_f
 
 
+class BBPostProcessing(nn.Module):
+    def __init__(self, score_size=16, total_stride=16, instance_size=255):
+        super(BBPostProcessing, self).__init__()
+
+        sz = score_size
+
+        sz_x = sz // 2
+        sz_y = sz // 2
+
+        x, y = np.meshgrid(np.arange(0, sz) - np.floor(float(sz_x)),
+                           np.arange(0, sz) - np.floor(float(sz_y)))
+
+        grid_to_search_x = x * total_stride + instance_size // 2
+        grid_to_search_y = y * total_stride + instance_size // 2
+
+        grid_to_search_x = grid_to_search_x.astype(np.float32)
+        grid_to_search_y = grid_to_search_y.astype(np.float32)
+
+
+        self.grid_to_search_x = nn.Parameter( torch.from_numpy(grid_to_search_x) )
+        self.grid_to_search_y = nn.Parameter( torch.from_numpy(grid_to_search_y) )        
+
+    def forward(self, bbox_pred):
+
+        pred_x1 = self.grid_to_search_x - bbox_pred[0, :, :]
+        pred_y1 = self.grid_to_search_y - bbox_pred[1, :, :]
+        pred_x2 = self.grid_to_search_x + bbox_pred[2, :, :]
+        pred_y2 = self.grid_to_search_y + bbox_pred[3, :, :]
+
+        pred_xs = (pred_x1 + pred_x2) / 2
+        pred_ys = (pred_y1 + pred_y2) / 2
+        pred_w  = pred_x2 - pred_x1
+        pred_h  = pred_y2 - pred_y1
+
+        return pred_xs, pred_ys, pred_w, pred_h
+
 
 class LightTrackForward(nn.Module):
     def __init__(self, model):
@@ -136,6 +172,9 @@ class LightTrackForward(nn.Module):
 
         self.mean = torch.tensor([0.485, 0.456, 0.406], device="cuda").view(3, 1, 1)
         self.std = torch.tensor([0.229, 0.224, 0.225], device="cuda").view(3, 1, 1)
+
+        self.bb_pp = BBPostProcessing()
+
 
     def normalize(self, x):
         """ input is in (C,H,W) format"""
@@ -152,9 +191,19 @@ class LightTrackForward(nn.Module):
         x_f = self.neck(x_f)
         x_f = self.feature_fusor(z_f, x_f)
         oup = self.head(x_f)
-        return oup['reg'], oup['cls']
+        bbox_pred, cls_score = oup['reg'], oup['cls']
+        # return oup['reg'], oup['cls']
 
-        return x_f
+        cls_score = F.sigmoid(cls_score).squeeze()
+
+        bbox_pred = bbox_pred.squeeze()
+
+        pred_xs, pred_ys, pred_w, pred_h = self.bb_pp(bbox_pred)
+
+        return pred_xs, pred_ys, pred_w, pred_h, cls_score
+
+
+
 
 
 class SuperNetToolbox(object):

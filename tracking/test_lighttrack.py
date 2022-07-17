@@ -166,7 +166,7 @@ def main():
     siam_net.eval()
     siam_net = siam_net.cuda()
 
-    temp_model = models.LightTrackTemplateMaker(siam_net)
+    temp_model = models.LightTrackTemplateMaker(siam_net).cuda()
     dummy_input = torch.randn(1, 127, 127, 3, device="cuda")
     input_names  = [ "template_maker_input" ]
     output_names = [ "template_maker_kernel_output"]
@@ -176,11 +176,11 @@ def main():
 
 
 
-    forw_model = models.LightTrackForward(siam_net)
+    forw_model = models.LightTrackForward(siam_net).cuda()
     dummy_input = torch.randn(1, 255, 255, 3, device="cuda")
     dummy_kernel = torch.randn(1, 96, 8, 8, device="cuda")
     input_names  = [ "forward_input", "forward_kernel" ]
-    output_names = [ "forward_reg_output", "forward_cls_output"]
+    output_names = [ "forward_delta0_output", "forward_delta1_output", "forward_delta2_output", "forward_delta3_output", "forward_cls_output" ]
 
     torch.onnx.export(forw_model, (dummy_input, dummy_kernel), "LightTrack_Forward.onnx", export_params=True,
         verbose=True, input_names=input_names, output_names=output_names)
