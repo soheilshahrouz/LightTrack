@@ -125,7 +125,7 @@ class LightTrackTemplateMaker(nn.Module):
 
 
 class BBPostProcessing(nn.Module):
-    def __init__(self, score_size=16, total_stride=16, instance_size=255):
+    def __init__(self, score_size=16, total_stride=16, instance_size=255, mem_len=1):
         super(BBPostProcessing, self).__init__()
 
         sz = score_size
@@ -136,22 +136,30 @@ class BBPostProcessing(nn.Module):
         x, y = np.meshgrid(np.arange(0, sz) - np.floor(float(sz_x)),
                            np.arange(0, sz) - np.floor(float(sz_y)))
 
-        grid_to_search_x = x * total_stride + instance_size // 2
-        grid_to_search_y = y * total_stride + instance_size // 2
+        x_tiled = np.tile(x, (mem_len, 1, 1))
+        y_tiled = np.tile(y, (mem_len, 1, 1))
+
+        grid_to_search_x = x_tiled * total_stride + instance_size // 2
+        grid_to_search_y = y_tiled * total_stride + instance_size // 2
 
         grid_to_search_x = grid_to_search_x.astype(np.float32)
         grid_to_search_y = grid_to_search_y.astype(np.float32)
 
-
         self.grid_to_search_x = nn.Parameter( torch.from_numpy(grid_to_search_x) )
         self.grid_to_search_y = nn.Parameter( torch.from_numpy(grid_to_search_y) )        
 
+        self.mem_len = mem_len
+        self.score_size = x.shape[0]
+
+
     def forward(self, bbox_pred):
 
-        pred_x1 = self.grid_to_search_x - bbox_pred[0, :, :]
-        pred_y1 = self.grid_to_search_y - bbox_pred[1, :, :]
-        pred_x2 = self.grid_to_search_x + bbox_pred[2, :, :]
-        pred_y2 = self.grid_to_search_y + bbox_pred[3, :, :]
+        bbox_pred = bbox_pred.view(self.mem_len, 4, self.score_size, self.score_size)
+
+        pred_x1 = self.grid_to_search_x - bbox_pred[:, 0, :]
+        pred_y1 = self.grid_to_search_y - bbox_pred[:, 1, :]
+        pred_x2 = self.grid_to_search_x + bbox_pred[:, 2, :]
+        pred_y2 = self.grid_to_search_y + bbox_pred[:, 3, :]
 
         pred_xs = (pred_x1 + pred_x2) / 2
         pred_ys = (pred_y1 + pred_y2) / 2
@@ -192,8 +200,7 @@ class LightTrackForward(nn.Module):
         x_f = self.feature_fusor(z_f, x_f)
         oup = self.head(x_f)
         bbox_pred, cls_score = oup['reg'], oup['cls']
-        # return oup['reg'], oup['cls']
-
+        
         cls_score = F.sigmoid(cls_score).squeeze()
 
         bbox_pred = bbox_pred.squeeze()
@@ -203,6 +210,54 @@ class LightTrackForward(nn.Module):
         return pred_xs, pred_ys, pred_w, pred_h, cls_score
 
 
+
+class THORLightTrackForward(nn.Module):
+    def __init__(self, model, mem_len):
+        super(THORLightTrackForward, self).__init__()
+
+        self.features = model.features
+        self.neck = model.neck.BN_x
+        self.feature_fusor = model.feature_fusor
+        self.head = model.head
+
+        self.mean = torch.tensor([0.485, 0.456, 0.406], device="cuda").view(3, 1, 1)
+        self.std = torch.tensor([0.229, 0.224, 0.225], device="cuda").view(3, 1, 1)
+
+        self.bb_pp = BBPostProcessing(mem_len=mem_len)
+
+        self.mem_len = mem_len
+
+
+    def normalize(self, x):
+        """ input is in (C,H,W) format"""
+        x /= 255
+        x -= self.mean
+        x /= self.std
+        return x
+
+    def forward(self, x, z_f):
+        
+        x_perm = x.permute((0, 3, 1, 2))
+        z_f_list = list(z_f)
+
+        x_norm = self.normalize(x_perm)
+        x_f = self.features(x_norm)
+        x_f = self.neck(x_f)
+        corr = [self.feature_fusor(z, x_f) for z in z_f_list]
+        oup = [self.head(c) for c in corr]
+        bbox_list = [o['reg'] for o in oup]
+        cls_list = [o['cls'] for o in oup]
+
+        bbox_pred = torch.cat(bbox_list, dim=0)
+        cls_score = torch.cat(cls_list, dim=0)
+
+        cls_score = F.sigmoid(cls_score).squeeze()
+
+        bbox_pred = bbox_pred.squeeze()
+
+        pred_xs, pred_ys, pred_w, pred_h = self.bb_pp(bbox_pred)
+
+        return pred_xs, pred_ys, pred_w, pred_h, cls_score
 
 
 
