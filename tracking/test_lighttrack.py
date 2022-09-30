@@ -168,15 +168,15 @@ def main():
 
 
 
-    mem_len = 7
-    forw_model = models.THORLightTrackForward(siam_net, mem_len).cuda()
-    dummy_input = torch.randn(1, 255, 255, 3, device="cuda")
-    dummy_kernel = torch.randn(mem_len, 96, 8, 8, device="cuda")
-    input_names  = [ "forward_input", "forward_kernel" ]
-    output_names = [ "forward_delta0_output", "forward_delta1_output", "forward_delta2_output", "forward_delta3_output", "forward_cls_output" ]
+    for mem_len in range(5, 16):
+        forw_model = models.THORLightTrackForward(siam_net, mem_len).cuda()
+        dummy_input = torch.randn(1, 255, 255, 3, device="cuda")
+        dummy_kernel = torch.randn(mem_len, 96, 8, 8, device="cuda")
+        input_names  = [ "forward_input", "forward_kernel" ]
+        output_names = [ "forward_delta0_output", "forward_delta1_output", "forward_delta2_output", "forward_delta3_output", "forward_cls_output" ]
 
-    torch.onnx.export(forw_model, (dummy_input, dummy_kernel), "THORLightTrack_Forward.onnx", export_params=True,
-        verbose=True, input_names=input_names, output_names=output_names)
+        torch.onnx.export(forw_model, (dummy_input, dummy_kernel), "LightTrack_Forward_THOR" + str(mem_len) + ".onnx",
+            export_params=True, verbose=True, input_names=input_names, output_names=output_names)
 
 
 
